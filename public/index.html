@@ -18,8 +18,14 @@
     <div class="workspace">
       <section class="conversation" aria-label="智能体对话">
         <div id="intro" class="intro"><span class="pill">为未知主题，准备好起点</span><h2>你的下一个想法，<br>从这里开始<span>。</span></h2><p id="description">从一个主题词，走向一个能解决问题的智能体。</p><div id="starters" class="starters"></div></div>
+        <section id="run-console" class="run-console" hidden aria-label="任务执行面板">
+          <div class="run-heading"><div><span class="eyebrow">LIVE EXECUTION</span><h3 id="run-state">等待任务</h3></div><span id="run-indicator" class="run-indicator">待命</span></div>
+          <div class="run-metrics"><div><strong id="run-duration">0.0s</strong><span>执行耗时</span></div><div><strong id="run-model-count">0</strong><span>模型请求</span></div><div><strong id="run-tool-count">0</strong><span>工具调用</span></div></div>
+          <details class="timeline-details" open><summary>执行时间线 <span>仅展示执行事件，不展示内部思考</span></summary><ol id="timeline" class="timeline"></ol></details>
+          <button id="retry-run" type="button" class="retry-button" hidden>↻ 重试此任务</button>
+        </section>
         <div id="messages" role="log" aria-label="聊天消息" aria-live="polite"></div>
-        <div class="composer-wrap"><div id="status" class="status" role="status"></div><form id="composer"><label for="prompt" class="sr-only">输入你的问题</label><textarea id="prompt" rows="2" maxlength="8000" placeholder="说说你想解决的问题… Enter 发送，Shift + Enter 换行"></textarea><div class="composer-bottom"><span>资料检索 · 工具调用 · 会话记录</span><button id="send" type="submit">发送 ↗</button></div></form><p class="footnote">演示模式只返回本地资料；接入模型后启用完整智能体能力。</p></div>
+        <div class="composer-wrap"><div id="status" class="status" role="status"></div><form id="composer"><label for="prompt" class="sr-only">输入你的问题</label><textarea id="prompt" rows="2" maxlength="8000" placeholder="说说你想解决的问题… Enter 发送，Shift + Enter 换行"></textarea><div class="composer-bottom"><span>资料检索 · 工具调用 · 会话记录</span><div class="send-actions"><button id="stop-run" type="button" hidden>■ 停止</button><button id="send" type="submit">发送 ↗</button></div></div></form><p class="footnote">演示模式只返回本地资料；接入模型后启用完整智能体能力。</p></div>
       </section>
       <aside class="inspector"><div class="panel-heading">项目面板 <span>01</span></div><div class="theme-card"><span class="eyebrow">CURRENT THEME</span><h3 id="theme">待抽取主题</h3><p>主题揭晓后，替换角色设定、领域资料与业务工具。</p><span class="tag">引擎已就绪</span></div><div class="panel-heading tools-heading">可用能力</div><div id="tools"></div><div class="architecture"><span class="eyebrow">HOW IT WORKS</span><p>理解你的目标</p><span>↓</span><p>模型选择工具 · 获取依据</p><span>↓</span><p>生成可执行的结果</p></div><button id="export" class="export">↓ 导出当前会话</button><small class="storage-note">会话保存在当前浏览器。请勿在共享设备中输入敏感信息。</small></aside>
     </div>

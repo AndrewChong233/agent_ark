@@ -6,6 +6,7 @@ try {
   if (Array.isArray(saved)) sessions = saved.filter(s => typeof s.id === 'string' && typeof s.title === 'string' && Array.isArray(s.messages)).slice(0, 20);
 } catch { /* 损坏或禁用存储时使用临时会话。 */ }
 let current, config, pending = false;
+let activeRunId = null, eventSource = null, runTimer = null, reconnectTimer = null;
 const toolLabels = { search_knowledge: ['⌕', '资料检索', '搜索本地知识库'], create_checklist: ['☷', '任务清单', '将目标拆成行动步骤'], current_time: ['◷', '时间感知', '获取当前中国标准时间'] };
 
 function save() {
@@ -24,33 +25,73 @@ function renderHistory() {
 }
 function render() {
   renderHistory();
-  $('intro').hidden = current.messages.length > 0;
+  renderRun();
+  $('intro').hidden = current.messages.length > 0 || Boolean(current.lastRun);
   $('messages').replaceChildren();
   for (const message of current.messages) {
     const article = node('article', undefined, `message ${message.role}`);
     article.append(node('div', message.role === 'user' ? 'YOU / 你' : `ARK / ${message.mode === 'demo' ? '演示模式' : '智能体'}`, 'message-label'));
     article.append(node('div', message.content, 'bubble'));
     if (message.trace?.length) {
+      for (const entry of message.trace) article.append(toolCard(entry));
       const details = node('details', undefined, 'trace');
-      details.append(node('summary', `${message.trace.length} 次工具调用 · 查看依据`));
+      details.append(node('summary', `${message.trace.length} 次工具调用 · 原始记录`));
       for (const entry of message.trace) {
         details.append(node('strong', toolLabels[entry.name]?.[1] || entry.name));
         details.append(node('pre', JSON.stringify({ 参数: entry.args, 结果: entry.result }, null, 2)));
-        if (entry.name === 'create_checklist' && entry.result?.items) {
-          const checklist = node('div', undefined, 'checklist');
-          checklist.append(node('strong', entry.result.title));
-          for (const item of entry.result.items) {
-            const label = node('label'); const check = node('input'); check.type = 'checkbox'; check.checked = item.done;
-            check.onchange = () => { item.done = check.checked; save(); };
-            label.append(check, node('span', item.text)); checklist.append(label);
-          }
-          article.append(checklist);
-        }
       }
       article.append(details);
     }
     $('messages').append(article);
   }
+}
+function toolCard(entry) {
+  const card = node('section', undefined, `result-card${entry.result?.error ? ' result-error' : ''}`);
+  const title = toolLabels[entry.name]?.[1] || entry.name;
+  card.append(node('div', `${toolLabels[entry.name]?.[0] || '◇'}  ${title}`, 'result-title'));
+  if (entry.result?.error) { card.append(node('p', entry.result.error)); return card; }
+  if (entry.name === 'search_knowledge') {
+    const matches = entry.result?.matches || [];
+    card.append(node('small', `找到 ${matches.length} 条相关资料 · 关键词检索`));
+    for (const match of matches) {
+      const source = node('div', undefined, 'source-item');
+      source.append(node('span', `${match.source} · 第 ${match.line} 行`, 'source-label'), node('p', match.text)); card.append(source);
+    }
+    if (!matches.length) card.append(node('p', '暂无匹配资料，可以调整检索词或补充知识库。'));
+  } else if (entry.name === 'create_checklist' && entry.result?.items) {
+    card.append(node('strong', entry.result.title));
+    const progress = node('small', undefined, 'check-progress');
+    const refresh = () => { progress.textContent = `${entry.result.items.filter(i => i.done).length} / ${entry.result.items.length} 已完成`; };
+    refresh(); card.append(progress);
+    for (const item of entry.result.items) {
+      const label = node('label', undefined, 'task-item'); const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = item.done;
+      checkbox.onchange = () => { item.done = checkbox.checked; refresh(); save(); };
+      label.append(checkbox, node('span', item.text)); card.append(label);
+    }
+  } else if (entry.name === 'current_time') {
+    card.append(node('p', entry.result.time), node('small', entry.result.timezone));
+  } else card.append(node('pre', JSON.stringify(entry.result, null, 2)));
+  return card;
+}
+const runStates = { connecting: '正在建立任务', running: '任务执行中', completed: '任务已完成', failed: '任务未完成', cancelled: '任务已停止', interrupted: '连接已中断' };
+function eventLabel(event) {
+  const data = event.data || {}; const name = toolLabels[data.name]?.[1] || data.name;
+  return ({ started: data.mode === 'demo' ? '任务开始 · 演示模式' : '任务开始 · 模型模式', demo: '本地演示 · 不调用模型', model_start: `第 ${data.step} 次模型请求`, model_end: `第 ${data.step} 次模型响应已收到`, tool_start: `开始执行：${name}`, tool_end: `${data.result?.error ? '执行出错' : '执行完成'}：${name}`, completed: '任务完成', failed: data.message, cancelled: '任务已停止' })[event.type] || event.type;
+}
+function renderRun() {
+  const run = current?.lastRun; $('run-console').hidden = !run; if (!run) return;
+  $('run-console').dataset.state = run.status;
+  $('run-state').textContent = runStates[run.status] || run.status;
+  $('run-indicator').textContent = ({ connecting: '连接中', running: '执行中', completed: '已完成', failed: '失败', cancelled: '已停止', interrupted: '已断开' })[run.status] || '';
+  $('run-duration').textContent = (run.elapsedMs || 0) < 1 ? '<1ms' : run.elapsedMs < 1000 ? `${Math.round(run.elapsedMs)}ms` : `${(run.elapsedMs / 1000).toFixed(1)}s`;
+  $('run-model-count').textContent = run.modelCalls || 0;
+  $('run-tool-count').textContent = run.toolCalls || 0;
+  $('timeline').replaceChildren();
+  for (const event of run.events || []) {
+    const item = node('li', undefined, `event-${event.type}`);
+    item.append(node('span', eventLabel(event)), node('time', event.elapsedMs < 1000 ? `${event.elapsedMs}ms` : `${(event.elapsedMs / 1000).toFixed(2)}s`)); $('timeline').append(item);
+  }
+  $('retry-run').hidden = pending || !['failed', 'cancelled', 'interrupted'].includes(run.status);
 }
 function newChat() {
   if (pending) return;
@@ -64,22 +105,69 @@ async function send(event) {
   if (current.messages.length >= 40) { $('status').textContent = '本次会话已达上限，请新建会话。'; return; }
   const requestMessages = [...current.messages.map(({ role, content }) => ({ role, content })), { role: 'user', content }];
   pending = true; $('send').disabled = true; $('new-chat').disabled = true; $('compact-new').disabled = true; $('prompt').disabled = true;
+  $('model-settings').disabled = true; $('stop-run').hidden = false; $('stop-run').disabled = true;
+  current.lastRun = { status: 'connecting', prompt: content, events: [], elapsedMs: 0, modelCalls: 0, toolCalls: 0 };
+  const run = current.lastRun;
+  const started = performance.now();
+  runTimer = setInterval(() => { run.elapsedMs = performance.now() - started; renderRun(); }, 100);
   current.messages.push({ role: 'user', content });
   if (current.messages.length === 1) current.title = content.slice(0, 24);
   $('prompt').value = ''; render(); save(); $('status').textContent = config.mode === 'demo' ? '正在检索本地资料…' : '智能体正在处理，可能需要调用工具…';
+  $('run-console').scrollIntoView({ behavior: 'smooth', block: 'start' });
   try {
-    const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: requestMessages }), signal: AbortSignal.timeout(130000) });
+    const response = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: requestMessages }), signal: AbortSignal.timeout(15000) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '请求失败');
-    current.messages.push({ role: 'assistant', ...result }); save(); $('status').textContent = '';
+    activeRunId = result.runId; run.runId = result.runId; run.status = 'running'; save(); $('stop-run').disabled = false;
+    await new Promise((resolve, reject) => {
+      eventSource = new EventSource(`/api/runs/${encodeURIComponent(activeRunId)}/events`);
+      eventSource.onmessage = message => {
+        clearTimeout(reconnectTimer);
+        try {
+          const event = JSON.parse(message.data);
+          if (run.events.some(old => old.seq === event.seq)) return;
+          run.events.push(event); run.elapsedMs = event.elapsedMs;
+          if (event.type === 'model_start') run.modelCalls++;
+          if (event.type === 'tool_start') run.toolCalls++;
+          $('status').textContent = eventLabel(event); renderRun();
+          if (['completed', 'failed', 'cancelled'].includes(event.type)) {
+            eventSource.close(); clearInterval(runTimer); run.status = event.type; run.elapsedMs = event.elapsedMs;
+            if (event.type === 'completed') { current.messages.push({ role: 'assistant', ...event.data }); resolve(); }
+            else reject(new Error(event.data.message || '任务已停止'));
+          }
+        } catch (error) { eventSource.close(); reject(error); }
+      };
+      eventSource.onerror = () => {
+        $('status').textContent = '事件连接中断，正在尝试恢复…';
+        if (!reconnectTimer) reconnectTimer = setTimeout(() => {
+          eventSource.close(); run.status = 'interrupted';
+          fetch(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+          reject(new Error('无法恢复事件连接，请确认后端仍在运行'));
+        }, 12000);
+      };
+      eventSource.onopen = () => { clearTimeout(reconnectTimer); reconnectTimer = null; };
+    });
+    save(); $('status').textContent = '任务完成，可查看执行记录和工具结果。';
   } catch (error) {
+    if (['connecting', 'running'].includes(run.status)) run.status = 'failed';
     current.messages.pop(); $('prompt').value = content; save();
-    $('status').textContent = `未完成：${error.message}。输入已保留，可重试。`;
+    $('status').textContent = `${error.message}。输入已保留，可重试。`;
   } finally {
+    eventSource?.close(); eventSource = null; activeRunId = null; clearInterval(runTimer); clearTimeout(reconnectTimer); reconnectTimer = null;
+    $('stop-run').hidden = true; $('model-settings').disabled = false;
     pending = false; $('send').disabled = false; $('new-chat').disabled = false; $('compact-new').disabled = false; $('prompt').disabled = false; render(); $('prompt').focus();
-    $('composer').scrollIntoView({ behavior: 'smooth', block: 'end' });
+    $('messages').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
+$('stop-run').onclick = async () => {
+  if (!activeRunId) return;
+  $('stop-run').disabled = true; $('status').textContent = '正在请求后端停止任务…';
+  try {
+    const response = await fetch(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('停止请求失败');
+  } catch (error) { $('status').textContent = `${error.message}，可再次尝试停止。`; $('stop-run').disabled = false; }
+};
+$('retry-run').onclick = () => { if (!pending && current.lastRun) { $('prompt').value = current.lastRun.prompt; $('composer').requestSubmit(); } };
 $('composer').onsubmit = send;
 $('prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); } };
 $('new-chat').onclick = newChat;
@@ -138,6 +226,11 @@ async function init() {
       const item = node('div', undefined, 'tool'); const body = node('div'); body.append(node('strong', title), node('small', description)); item.append(node('span', icon, 'tool-icon'), body); $('tools').append(item);
     }
   } catch (error) { $('mode').textContent = '连接失败'; $('status').textContent = `${error.message}，请刷新页面重试。`; $('send').disabled = true; }
+}
+for (const session of sessions) if (['connecting', 'running'].includes(session.lastRun?.status)) {
+  session.lastRun.status = 'interrupted';
+  if (session.messages.at(-1)?.role === 'user') session.messages.pop();
+  if (session.lastRun.runId) fetch(`/api/runs/${encodeURIComponent(session.lastRun.runId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
 }
 if (sessions.length) { current = sessions[0]; render(); } else newChat();
 init();

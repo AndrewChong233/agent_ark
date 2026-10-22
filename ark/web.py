@@ -2,13 +2,15 @@
 
 import asyncio
 from dataclasses import replace
+from contextlib import asynccontextmanager
 import json
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from .engine import ModelError, run_agent
+from .engine import ModelError, run_agent, validate_messages
+from .runs import RunManager, TERMINAL
 from .settings import ROOT, ModelSettings, validate_model_settings
 
 MAX_BODY = 100000
@@ -39,9 +41,15 @@ def read_config():
 
 
 def create_app(settings=None):
-    app = FastAPI(title="ARK Agent", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        await app.state.runs.close()
+
+    app = FastAPI(title="ARK Agent", version="0.3.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.settings = settings if settings is not None else ModelSettings.from_environment()
     app.state.busy = 0
+    app.state.runs = RunManager(app.state)
 
     @app.middleware("http")
     async def boundary(request: Request, call_next):
@@ -89,7 +97,53 @@ def create_app(settings=None):
 
     @app.get("/api/health")
     async def health():
-        return {"status": "ok", "backend": "python", "version": "0.2.0"}
+        return {"status": "ok", "backend": "python", "version": "0.3.0"}
+
+    @app.post("/api/runs")
+    async def start_run(request: Request):
+        data = await read_json(request)
+        messages = validate_messages(data.get("messages"))
+        if app.state.busy >= 3:
+            return JSONResponse({"error": "当前任务较多，请稍后再试"}, 429)
+        run = app.state.runs.start(messages=messages, config=read_config(), settings=app.state.settings)
+        return {"runId": run.id}
+
+    @app.post("/api/runs/{run_id}/cancel")
+    async def cancel_run(run_id: str):
+        run = app.state.runs.runs.get(run_id)
+        if not run:
+            return JSONResponse({"error": "任务不存在或已过期"}, 404)
+        await app.state.runs.cancel(run)
+        return {"status": run.status}
+
+    @app.get("/api/runs/{run_id}/events")
+    async def run_events(run_id: str, request: Request):
+        run = app.state.runs.runs.get(run_id)
+        if not run:
+            return JSONResponse({"error": "任务不存在或已过期"}, 404)
+        try:
+            index = int(request.headers.get("last-event-id", "-1")) + 1
+            if index < 0 or index > len(run.events):
+                raise ValueError
+        except ValueError:
+            return JSONResponse({"error": "事件位置不正确"}, 400)
+
+        async def stream():
+            nonlocal index
+            while True:
+                while index < len(run.events):
+                    event = run.events[index]
+                    yield f"id: {index}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    index += 1
+                if run.status in TERMINAL:
+                    return
+                run.changed.clear()
+                try:
+                    await asyncio.wait_for(run.changed.wait(), 15)
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
 
     @app.get("/api/config")
     async def config():

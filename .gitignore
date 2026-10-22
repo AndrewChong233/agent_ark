@@ -11,3 +11,4 @@ python-backend-preview.png
 *.pyc
 .pytest_cache/
 .ruff_cache/
+execution-preview.png

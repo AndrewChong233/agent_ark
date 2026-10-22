@@ -58,7 +58,11 @@ async def call_model(messages, definitions, settings: ModelSettings, *, transpor
     return message
 
 
-async def run_agent(*, messages, config, settings=None, model=None, demo=None):
+async def run_agent(*, messages, config, settings=None, model=None, demo=None, on_event=None):
+    async def emit(event_type, **data):
+        if on_event:
+            await on_event(event_type, data)
+
     settings = settings or ModelSettings()
     history = validate_messages(messages)
     enabled_names = config["enabledTools"]
@@ -68,12 +72,15 @@ async def run_agent(*, messages, config, settings=None, model=None, demo=None):
     if demo is None:
         demo = not settings.api_key
     if demo:
+        await emit("demo", message="演示模式：仅检索本地资料，不请求模型")
         if "search_knowledge" not in allowed_names:
             return {"mode": "demo", "trace": trace, "content": "【演示模式】当前未启用知识库工具。配置模型后可开始智能对话。"}
         query = history[-1]["content"]
         # 长对话输入允许 8000 字；检索工具最多接受 1000 字。
         args = {"query": query[:1000]}
+        await emit("tool_start", name="search_knowledge", args=args, callId="demo-search")
         result = await asyncio.to_thread(execute_tool, "search_knowledge", args)
+        await emit("tool_end", name="search_knowledge", args=args, result=result, callId="demo-search")
         trace.append({"name": "search_knowledge", "args": args, "result": result})
         if result["matches"]:
             excerpts = "\n\n".join(f"• {m['text']}\n  来源：{m['source']} 第 {m['line']} 行" for m in result["matches"])
@@ -83,8 +90,10 @@ async def run_agent(*, messages, config, settings=None, model=None, demo=None):
         return {"mode": "demo", "trace": trace, "content": content}
 
     transcript = [{"role": "system", "content": config["systemPrompt"]}, *history]
-    for _ in range(5):
+    for step in range(5):
+        await emit("model_start", step=step + 1)
         reply = await model(transcript, definitions) if model else await call_model(transcript, definitions, settings)
+        await emit("model_end", step=step + 1)
         if not isinstance(reply, dict):
             raise ModelError("模型没有返回有效消息")
         calls = reply.get("tool_calls")
@@ -104,6 +113,7 @@ async def run_agent(*, messages, config, settings=None, model=None, demo=None):
         for call in calls:
             name = call["function"].get("name", "unknown")
             args = {}
+            await emit("tool_start", name=name if isinstance(name, str) else "unknown", callId=call["id"])
             try:
                 if not isinstance(name, str) or name not in allowed_names:
                     raise ValueError("工具未启用")
@@ -116,6 +126,7 @@ async def run_agent(*, messages, config, settings=None, model=None, demo=None):
                 result = {"error": str(error)}
             except OSError:
                 result = {"error": "工具资料读取失败，请检查知识库文件"}
+            await emit("tool_end", name=name if isinstance(name, str) else "unknown", args=args, result=result, callId=call["id"])
             trace.append({"name": name, "args": args, "result": result})
             transcript.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
     raise ModelError("达到 5 轮调用上限，请缩小任务范围后重试")
