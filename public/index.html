@@ -14,7 +14,7 @@
   </aside>
   <main>
     <header><div><span class="eyebrow">AGENT WORKSPACE</span><h1 id="agent-name">智能体工作台</h1></div><div class="header-actions"><span id="mode" class="mode">正在连接…</span><button id="model-settings" class="settings-button">⚙ 模型配置</button></div></header>
-    <nav class="compact-actions" aria-label="会话操作"><button id="compact-new">＋ 新建会话</button><button id="compact-export">↓ 导出会话</button></nav>
+    <nav class="compact-actions" aria-label="会话操作"><button id="compact-new">＋ 新建会话</button><button id="show-history">最近会话</button><button id="toggle-panel" aria-expanded="false">执行面板</button><button id="compact-export">↓ 导出会话</button></nav>
     <div class="workspace">
       <section class="conversation" aria-label="智能体对话">
         <div id="intro" class="intro"><span class="pill">为未知主题，准备好起点</span><h2>你的下一个想法，<br>从这里开始<span>。</span></h2><p id="description">从一个主题词，走向一个能解决问题的智能体。</p><div id="starters" class="starters"></div></div>
@@ -30,6 +30,7 @@
       <aside class="inspector"><div class="panel-heading">项目面板 <span>01</span></div><div class="theme-card"><span class="eyebrow">CURRENT THEME</span><h3 id="theme">待抽取主题</h3><p>主题揭晓后，替换角色设定、领域资料与业务工具。</p><span class="tag">引擎已就绪</span></div><div class="panel-heading tools-heading">可用能力</div><div id="tools"></div><div class="architecture"><span class="eyebrow">HOW IT WORKS</span><p>理解你的目标</p><span>↓</span><p>模型选择工具 · 获取依据</p><span>↓</span><p>生成可执行的结果</p></div><button id="export" class="export">↓ 导出当前会话</button><small class="storage-note">会话保存在当前浏览器。请勿在共享设备中输入敏感信息。</small></aside>
     </div>
   </main>
+  <dialog id="history-dialog" aria-labelledby="history-title"><div class="settings-heading"><h2 id="history-title">最近会话</h2><button id="close-history" aria-label="关闭会话列表">×</button></div><div id="dialog-history"></div></dialog>
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">
       <div class="settings-heading"><h2 id="settings-title">连接你的模型</h2><button id="close-settings" type="button" aria-label="关闭模型配置">×</button></div>

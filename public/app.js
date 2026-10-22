@@ -7,7 +7,40 @@ try {
 } catch { /* 损坏或禁用存储时使用临时会话。 */ }
 let current, config, pending = false;
 let activeRunId = null, eventSource = null, runTimer = null, reconnectTimer = null;
+let renderedRun = null, renderedEventCount = -1;
 const toolLabels = { search_knowledge: ['⌕', '资料检索', '搜索本地知识库'], create_checklist: ['☷', '任务清单', '将目标拆成行动步骤'], current_time: ['◷', '时间感知', '获取当前中国标准时间'] };
+document.querySelector('.inspector').prepend($('run-console'));
+$('toggle-panel').onclick = () => { const open = document.body.classList.toggle('panel-open'); $('toggle-panel').setAttribute('aria-expanded', String(open)); };
+$('show-history').onclick = () => { renderHistory(); $('history-dialog').showModal(); };
+$('close-history').onclick = () => $('history-dialog').close();
+function copyButton(text, label = '复制') {
+  const button = node('button', label, 'copy-button'); button.type = 'button';
+  button.onclick = async () => { try { await navigator.clipboard.writeText(text); button.textContent = '已复制'; } catch { button.textContent = '复制失败，请手动选择'; } };
+  return button;
+}
+function formattedText(text) {
+  const container = node('div', undefined, 'formatted-text');
+  let code = null, buffer = [];
+  for (const line of text.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      if (code) { code.append(node('pre', buffer.join('\n')), copyButton(buffer.join('\n'), '复制代码')); container.append(code); code = null; buffer = []; }
+      else code = node('div', undefined, 'code-block');
+      continue;
+    }
+    if (code) { buffer.push(line); continue; }
+    if (!line.trim()) { container.append(node('div', undefined, 'text-gap')); continue; }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const list = line.match(/^(?:[-*•]|\d+[.)、])\s+(.+)$/);
+    const block = node(heading ? 'h4' : 'p', undefined, list ? 'text-list-item' : '');
+    const content = heading ? heading[2] : list ? list[1] : line;
+    for (const part of content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)) {
+      block.append(part.startsWith('**') && part.endsWith('**') ? node('strong', part.slice(2, -2)) : part.startsWith('`') && part.endsWith('`') ? node('code', part.slice(1, -1)) : document.createTextNode(part));
+    }
+    container.append(block);
+  }
+  if (code) { code.append(node('pre', buffer.join('\n'))); container.append(code); }
+  return container;
+}
 
 function save() {
   try { localStorage.setItem(storeKey, JSON.stringify(sessions.slice(0, 20))); }
@@ -16,11 +49,15 @@ function save() {
 function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
 function renderHistory() {
   $('history').replaceChildren();
+  $('dialog-history').replaceChildren();
   for (const session of sessions) {
     const button = node('button', session.title, `history-item${session.id === current.id ? ' active' : ''}`);
     button.disabled = pending;
     button.onclick = () => { current = session; $('status').textContent = ''; render(); };
     $('history').append(button);
+    const mobileButton = node('button', session.title, button.className); mobileButton.disabled = pending;
+    mobileButton.onclick = () => { current = session; $('history-dialog').close(); $('status').textContent = ''; render(); };
+    $('dialog-history').append(mobileButton);
   }
 }
 function render() {
@@ -31,7 +68,9 @@ function render() {
   for (const message of current.messages) {
     const article = node('article', undefined, `message ${message.role}`);
     article.append(node('div', message.role === 'user' ? 'YOU / 你' : `ARK / ${message.mode === 'demo' ? '演示模式' : '智能体'}`, 'message-label'));
-    article.append(node('div', message.content, 'bubble'));
+    const bubble = node('div', undefined, 'bubble');
+    bubble.append(message.role === 'assistant' ? formattedText(message.content) : document.createTextNode(message.content)); article.append(bubble);
+    if (message.role === 'assistant') article.append(copyButton(message.content, '复制回答'));
     if (message.trace?.length) {
       for (const entry of message.trace) article.append(toolCard(entry));
       const details = node('details', undefined, 'trace');
@@ -61,8 +100,9 @@ function toolCard(entry) {
   } else if (entry.name === 'create_checklist' && entry.result?.items) {
     card.append(node('strong', entry.result.title));
     const progress = node('small', undefined, 'check-progress');
-    const refresh = () => { progress.textContent = `${entry.result.items.filter(i => i.done).length} / ${entry.result.items.length} 已完成`; };
-    refresh(); card.append(progress);
+    const bar = node('progress'); bar.max = entry.result.items.length; bar.setAttribute('aria-label', '清单完成进度');
+    const refresh = () => { const done = entry.result.items.filter(i => i.done).length; progress.textContent = `${done} / ${entry.result.items.length} 已完成`; bar.value = done; };
+    refresh(); card.append(progress, bar);
     for (const item of entry.result.items) {
       const label = node('label', undefined, 'task-item'); const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = item.done;
       checkbox.onchange = () => { item.done = checkbox.checked; refresh(); save(); };
@@ -86,10 +126,13 @@ function renderRun() {
   $('run-duration').textContent = (run.elapsedMs || 0) < 1 ? '<1ms' : run.elapsedMs < 1000 ? `${Math.round(run.elapsedMs)}ms` : `${(run.elapsedMs / 1000).toFixed(1)}s`;
   $('run-model-count').textContent = run.modelCalls || 0;
   $('run-tool-count').textContent = run.toolCalls || 0;
-  $('timeline').replaceChildren();
-  for (const event of run.events || []) {
+  if (renderedRun !== run || renderedEventCount !== (run.events || []).length) {
+    renderedRun = run; renderedEventCount = (run.events || []).length;
+    $('timeline').replaceChildren();
+    for (const event of run.events || []) {
     const item = node('li', undefined, `event-${event.type}`);
     item.append(node('span', eventLabel(event)), node('time', event.elapsedMs < 1000 ? `${event.elapsedMs}ms` : `${(event.elapsedMs / 1000).toFixed(2)}s`)); $('timeline').append(item);
+    }
   }
   $('retry-run').hidden = pending || !['failed', 'cancelled', 'interrupted'].includes(run.status);
 }
@@ -107,6 +150,7 @@ async function send(event) {
   pending = true; $('send').disabled = true; $('new-chat').disabled = true; $('compact-new').disabled = true; $('prompt').disabled = true;
   $('model-settings').disabled = true; $('stop-run').hidden = false; $('stop-run').disabled = true;
   current.lastRun = { status: 'connecting', prompt: content, events: [], elapsedMs: 0, modelCalls: 0, toolCalls: 0 };
+  if (matchMedia('(max-width:900px)').matches) { document.body.classList.add('panel-open'); $('toggle-panel').setAttribute('aria-expanded', 'true'); }
   const run = current.lastRun;
   const started = performance.now();
   runTimer = setInterval(() => { run.elapsedMs = performance.now() - started; renderRun(); }, 100);
