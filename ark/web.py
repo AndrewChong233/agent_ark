@@ -204,6 +204,11 @@ def create_app(settings=None):
     async def read_file(space_id: str, request: Request):
         return app.state.spaces.read(space_id, (await read_json(request)).get("name"))
 
+    @app.post("/api/spaces/{space_id}/draft")
+    async def draft_answer(space_id: str, request: Request):
+        data = await read_json(request)
+        return app.state.spaces.propose(space_id, data.get('name'), data.get('content'))
+
     @app.post("/api/spaces/{space_id}/approve")
     async def approve_file(space_id: str, request: Request):
         data = await read_json(request)

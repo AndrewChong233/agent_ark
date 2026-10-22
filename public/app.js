@@ -115,6 +115,15 @@ function render() {
     const bubble = node('div', undefined, 'bubble');
     bubble.append(message.role === 'assistant' ? formattedText(message.content) : document.createTextNode(message.content)); article.append(bubble);
     if (message.role === 'assistant') article.append(copyButton(message.content, '复制回答'));
+    if (message.role === 'assistant' && !message.trace?.some(t=>t.name==='propose_file' && !t.result?.error)) {
+      const draftButton=node('button','将回答生成文件草稿','copy-button');
+      draftButton.onclick=async()=>{
+        if(!current.spaceId){$('status').textContent='请先在上方选择主题空间；也可以在会话地图中创建空间。';$('space-select').focus();return;}
+        draftButton.disabled=true;
+        try{const result=await api(`/api/spaces/${current.spaceId}/draft`,{name:`回答-${crypto.randomUUID().slice(0,8)}.md`,content:message.content});message.trace=message.trace||[];message.trace.push({name:'propose_file',args:{},result});save();render();}
+        catch(error){$('status').textContent=error.message;draftButton.disabled=false;}
+      };article.append(draftButton);
+    }
     if (message.trace?.length) {
       for (const entry of message.trace) article.append(toolCard(entry));
       const details = node('details', undefined, 'trace');
