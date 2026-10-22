@@ -1,14 +1,55 @@
 const $ = id => document.getElementById(id);
 const storeKey = 'ark.sessions.v1';
 let sessions = [];
+let spaces = [];
 try {
   const saved = JSON.parse(localStorage.getItem(storeKey) || '[]');
-  if (Array.isArray(saved)) sessions = saved.filter(s => typeof s.id === 'string' && typeof s.title === 'string' && Array.isArray(s.messages)).slice(0, 20);
+  if (Array.isArray(saved)) sessions = saved.filter(s => typeof s.id === 'string' && typeof s.title === 'string' && Array.isArray(s.messages)).slice(0, 200);
 } catch { /* 损坏或禁用存储时使用临时会话。 */ }
 let current, config, pending = false;
 let activeRunId = null, eventSource = null, runTimer = null, reconnectTimer = null;
 let renderedRun = null, renderedEventCount = -1;
 const toolLabels = { search_knowledge: ['⌕', '资料检索', '搜索本地知识库'], create_checklist: ['☷', '任务清单', '将目标拆成行动步骤'], current_time: ['◷', '时间感知', '获取当前中国标准时间'] };
+Object.assign(toolLabels, {propose_file:['▤','文件草稿','批准后才会写入'],list_space_files:['▦','空间文件','仅访问选定空间'],read_space_file:['▤','读取文件','仅访问选定空间']});
+async function api(path, data) {
+  const response = await fetch(path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  const result = await response.json(); if (!response.ok) throw new Error(result.error || '请求失败'); return result;
+}
+async function loadSpaces() {
+  spaces = (await api('/api/spaces')).spaces;
+  $('space-select').replaceChildren(node('option', '未归类 · 无文件权限'));
+  $('space-select').firstChild.value = '';
+  for (const space of spaces) { const option = node('option',space.name); option.value = space.id; $('space-select').append(option); }
+  $('space-select').value = current?.spaceId || '';
+}
+$('space-select').onchange = () => { if (pending) return; current.spaceId = $('space-select').value; save(); renderHistory(); };
+$('chat-search').oninput = renderHistory;
+function drawMap() {
+  $('conversation-map').replaceChildren(); $('space-suggestions').replaceChildren();
+  const transcript = current.messages.map(m=>m.content).join(' ');
+  for (const space of spaces.filter(s=>s.id!==current.spaceId && s.name.length>1 && transcript.includes(s.name))) {
+    const suggestion=node('button',`建议归入「${space.name}」`,'map-suggestion'); suggestion.onclick=()=>{current.spaceId=space.id;save();render();drawMap();}; $('space-suggestions').append(suggestion);
+  }
+  for (const space of [{id:'',name:'未归类'},...spaces]) {
+    const group=node('section',undefined,'map-branch'); const matches=sessions.filter(s=>(s.spaceId||'')===space.id);
+    group.append(node('h3',`${space.name} · ${matches.length} 个会话`));
+    if (!matches.length) group.append(node('small','尚无会话，在对话上方选择此空间即可归类。'));
+    for (const session of matches) {const button=node('button',session.title,'map-leaf');button.disabled=pending;button.onclick=()=>{current=session;$('organizer-dialog').close();render();};group.append(button);}
+    $('conversation-map').append(group);
+  }
+}
+$('organize').onclick=async()=>{$('organizer-dialog').showModal();try{await loadSpaces();drawMap();}catch(error){$('organizer-status').textContent=error.message;}};
+$('compact-organize').onclick=()=>$('organize').click();
+$('close-organizer').onclick=()=>$('organizer-dialog').close();
+$('create-space-form').onsubmit=async event=>{event.preventDefault();try{const space=await api('/api/spaces',{name:$('space-name').value});current.spaceId=space.id;save();$('space-name').value='';$('organizer-status').textContent='主题空间已创建。文件写入仍需要逐文件批准。';await loadSpaces();drawMap();render();}catch(error){$('organizer-status').textContent=error.message;}};
+$('close-files').onclick=()=>$('files-dialog').close();
+$('space-files').onclick=async()=>{
+  $('files-dialog').showModal();$('file-preview').textContent='';$('files-list').replaceChildren();
+  if(!current.spaceId){$('files-list').textContent='请先选择或创建主题空间。';return;}
+  try{const {files}=await api(`/api/spaces/${current.spaceId}/files`);if(!files.length)$('files-list').textContent='这里还没有文件。可以让智能体生成一份笔记草稿，批准后即可保存。';
+    for(const file of files){const button=node('button',`${file.name} · ${file.bytes} B`,'map-leaf');button.onclick=async()=>{try{$('file-preview').textContent=(await api(`/api/spaces/${current.spaceId}/read`,{name:file.name})).content;}catch(error){$('file-preview').textContent=error.message;}};$('files-list').append(button);}
+  }catch(error){$('files-list').textContent=error.message;}
+};
 document.querySelector('.inspector').prepend($('run-console'));
 $('toggle-panel').onclick = () => { const open = document.body.classList.toggle('panel-open'); $('toggle-panel').setAttribute('aria-expanded', String(open)); };
 $('show-history').onclick = () => { renderHistory(); $('history-dialog').showModal(); };
@@ -43,7 +84,7 @@ function formattedText(text) {
 }
 
 function save() {
-  try { localStorage.setItem(storeKey, JSON.stringify(sessions.slice(0, 20))); }
+  try { localStorage.setItem(storeKey, JSON.stringify(sessions.slice(0, 200))); }
   catch { $('status').textContent = '浏览器存储不可用，本次记录仅在页面内保留。'; }
 }
 function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
@@ -51,6 +92,8 @@ function renderHistory() {
   $('history').replaceChildren();
   $('dialog-history').replaceChildren();
   for (const session of sessions) {
+    const query = $('chat-search').value.trim().toLowerCase();
+    if (query && ![session.title,...session.messages.map(m=>m.content)].join(' ').toLowerCase().includes(query)) continue;
     const button = node('button', session.title, `history-item${session.id === current.id ? ' active' : ''}`);
     button.disabled = pending;
     button.onclick = () => { current = session; $('status').textContent = ''; render(); };
@@ -62,6 +105,7 @@ function renderHistory() {
 }
 function render() {
   renderHistory();
+  $('space-select').value = current.spaceId || '';
   renderRun();
   $('intro').hidden = current.messages.length > 0 || Boolean(current.lastRun);
   $('messages').replaceChildren();
@@ -89,6 +133,16 @@ function toolCard(entry) {
   const title = toolLabels[entry.name]?.[1] || entry.name;
   card.append(node('div', `${toolLabels[entry.name]?.[0] || '◇'}  ${title}`, 'result-title'));
   if (entry.result?.error) { card.append(node('p', entry.result.error)); return card; }
+  if (entry.name === 'propose_file') {
+    card.append(node('strong',entry.result.name),node('p',entry.approvalStatus || '草稿：尚未写入。请检查完整内容后批准。'));
+    const preview=node('pre',entry.result.content,'draft-preview');card.append(preview);
+    if(entry.approvalStatus)return card;
+    const scope = entry.result.spaceId;
+    for(const [allow,label] of [[true,'批准并新建文件'],[false,'拒绝写入']]){
+      const button=node('button',label,'approval-button');button.onclick=async()=>{button.disabled=true;try{const result=await api(`/api/spaces/${scope}/approve`,{approvalId:entry.result.approvalId,allow});entry.approvalStatus=result.status==='saved'?'已批准并保存到当前主题空间':'已拒绝，未写入文件';save();render();}catch(error){button.disabled=false;button.textContent=error.message;}};card.append(button);
+    }
+    return card;
+  }
   if (entry.name === 'search_knowledge') {
     const matches = entry.result?.matches || [];
     card.append(node('small', `找到 ${matches.length} 条相关资料 · 关键词检索`));
@@ -139,7 +193,7 @@ function renderRun() {
 function newChat() {
   if (pending) return;
   current = { id: crypto.randomUUID(), title: '新的探索', messages: [] };
-  sessions.unshift(current); sessions = sessions.slice(0, 20); save(); render(); $('status').textContent = ''; $('prompt').focus();
+  sessions.unshift(current); sessions = sessions.slice(0, 200); save(); render(); $('status').textContent = ''; $('prompt').focus();
 }
 async function send(event) {
   event.preventDefault();
@@ -148,6 +202,7 @@ async function send(event) {
   if (current.messages.length >= 40) { $('status').textContent = '本次会话已达上限，请新建会话。'; return; }
   const requestMessages = [...current.messages.map(({ role, content }) => ({ role, content })), { role: 'user', content }];
   pending = true; $('send').disabled = true; $('new-chat').disabled = true; $('compact-new').disabled = true; $('prompt').disabled = true;
+  $('space-select').disabled=true; $('organize').disabled=true; $('compact-organize').disabled=true;
   $('model-settings').disabled = true; $('stop-run').hidden = false; $('stop-run').disabled = true;
   current.lastRun = { status: 'connecting', prompt: content, events: [], elapsedMs: 0, modelCalls: 0, toolCalls: 0 };
   if (matchMedia('(max-width:900px)').matches) { document.body.classList.add('panel-open'); $('toggle-panel').setAttribute('aria-expanded', 'true'); }
@@ -159,7 +214,7 @@ async function send(event) {
   $('prompt').value = ''; render(); save(); $('status').textContent = config.mode === 'demo' ? '正在检索本地资料…' : '智能体正在处理，可能需要调用工具…';
   $('run-console').scrollIntoView({ behavior: 'smooth', block: 'start' });
   try {
-    const response = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: requestMessages }), signal: AbortSignal.timeout(15000) });
+    const response = await fetch('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: requestMessages, spaceId: current.spaceId || null }), signal: AbortSignal.timeout(15000) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '请求失败');
     activeRunId = result.runId; run.runId = result.runId; run.status = 'running'; save(); $('stop-run').disabled = false;
@@ -199,6 +254,7 @@ async function send(event) {
   } finally {
     eventSource?.close(); eventSource = null; activeRunId = null; clearInterval(runTimer); clearTimeout(reconnectTimer); reconnectTimer = null;
     $('stop-run').hidden = true; $('model-settings').disabled = false;
+    $('space-select').disabled=false; $('organize').disabled=false; $('compact-organize').disabled=false;
     pending = false; $('send').disabled = false; $('new-chat').disabled = false; $('compact-new').disabled = false; $('prompt').disabled = false; render(); $('prompt').focus();
     $('messages').lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -278,3 +334,4 @@ for (const session of sessions) if (['connecting', 'running'].includes(session.l
 }
 if (sessions.length) { current = sessions[0]; render(); } else newChat();
 init();
+loadSpaces().catch(error=>{$('status').textContent=`主题空间不可用：${error.message}。请重启后端。`;});

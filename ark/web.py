@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from .engine import ModelError, run_agent, validate_messages
 from .runs import RunManager, TERMINAL
 from .settings import ROOT, ModelSettings, validate_model_settings
+from .spaces import Spaces
 
 MAX_BODY = 100000
 SECURITY_HEADERS = {
@@ -50,6 +51,7 @@ def create_app(settings=None):
     app.state.settings = settings if settings is not None else ModelSettings.from_environment()
     app.state.busy = 0
     app.state.runs = RunManager(app.state)
+    app.state.spaces = Spaces()
 
     @app.middleware("http")
     async def boundary(request: Request, call_next):
@@ -105,7 +107,10 @@ def create_app(settings=None):
         messages = validate_messages(data.get("messages"))
         if app.state.busy >= 3:
             return JSONResponse({"error": "当前任务较多，请稍后再试"}, 429)
-        run = app.state.runs.start(messages=messages, config=read_config(), settings=app.state.settings)
+        space_id = data.get("spaceId")
+        if space_id:
+            app.state.spaces.directory(space_id)
+        run = app.state.runs.start(messages=messages, config=read_config(), settings=app.state.settings, space=(app.state.spaces, space_id) if space_id else None)
         return {"runId": run.id}
 
     @app.post("/api/runs/{run_id}/cancel")
@@ -182,6 +187,29 @@ def create_app(settings=None):
             return JSONResponse({"error": "任务超过两分钟，请缩小范围后重试"}, 504)
         finally:
             app.state.busy -= 1
+
+    @app.get("/api/spaces")
+    async def list_spaces():
+        return {"spaces": app.state.spaces.list()}
+
+    @app.post("/api/spaces")
+    async def create_space(request: Request):
+        return app.state.spaces.create((await read_json(request)).get("name"))
+
+    @app.get("/api/spaces/{space_id}/files")
+    async def list_files(space_id: str):
+        return {"files": app.state.spaces.files(space_id)}
+
+    @app.post("/api/spaces/{space_id}/read")
+    async def read_file(space_id: str, request: Request):
+        return app.state.spaces.read(space_id, (await read_json(request)).get("name"))
+
+    @app.post("/api/spaces/{space_id}/approve")
+    async def approve_file(space_id: str, request: Request):
+        data = await read_json(request)
+        if type(data.get("allow")) is not bool:
+            raise ValueError("需要明确批准或拒绝")
+        return app.state.spaces.approve(space_id, data.get("approvalId"), data["allow"])
 
     @app.get("/")
     async def index():

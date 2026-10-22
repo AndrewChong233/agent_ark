@@ -35,7 +35,7 @@ class RunManager:
         self.state = state
         self.runs = {}
 
-    def start(self, *, messages, config, settings):
+    def start(self, *, messages, config, settings, space=None):
         if self.state.busy >= 3:
             raise ValueError("当前任务较多，请稍后再试")
         # 只保留最近 30 个任务，正在执行的任务不会被清理。
@@ -52,7 +52,7 @@ class RunManager:
             try:
                 await run.emit("started", {"mode": "live" if settings.api_key else "demo"})
                 async with asyncio.timeout(120):
-                    result = await run_agent(messages=messages, config=config, settings=settings, on_event=run.emit)
+                    result = await run_agent(messages=messages, config=config, settings=settings, on_event=run.emit, space=space)
                 run.status = "completed"
                 await run.emit("completed", {**result, "modelCalls": run.model_calls, "toolCalls": run.tool_calls})
             except asyncio.CancelledError:
