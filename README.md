@@ -2,23 +2,92 @@
 
 THIS IS A FREAKING INCREDIBLE AGENT CREATION PROJECT
 
-这是抽题前准备的本地开发引擎。网页是交互入口，Node.js 后端负责模型请求、工具执行和资料检索。主题不固定，抽题后逐步增加领域功能。
+现在使用 **Python 3.12 + FastAPI** 后端和 HTML/CSS/JavaScript 网页。无需 Node.js。主题、工具和知识库相互独立，抽题后可以继续扩展；当前尚未接入通用文件生成或手机系统能力。
+
+## 在这台电脑用 PyCharm 运行
+
+1. 打开项目目录 `AGENT_ARK`。
+2. 在 Settings → Project → Python Interpreter 中添加现有解释器，选择项目内的 `.venv\Scripts\python.exe`。本次迁移已创建这个环境并安装依赖。
+3. 打开 `main.py`，右键 Run。以后可复用 PyCharm 自动生成的这个运行配置。
+4. 浏览器访问 http://127.0.0.1:3000 。也可以直接双击 `start.cmd`。
+
+先停止占用 3000 端口的旧服务，再启动新服务。PyCharm 的停止按钮或终端 Ctrl+C 可以停止服务。`http://127.0.0.1:3000/api/health` 返回 `backend: python` 可确认运行的是新后端。
+
+虚拟环境依赖应用自带的 Python 3.12 运行时；若运行时位置改变或环境失效，按下一节用自己安装的 Python 重建 `.venv`。不要把虚拟环境复制给组员。
+
+## 组员首次运行 / 新电脑配置
+
+先安装 Python 3.12。在 Windows PowerShell 中执行：
+
+```powershell
+git clone https://github.com/AndrewChong233/agent_ark.git
+cd agent_ark
+git switch codex/python-backend
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+已有仓库时跳过 `git clone`。迁移版本位于 `codex/python-backend` 分支，合并前先用 `git switch codex/python-backend` 切换。
+
+macOS/Linux：
+
+```sh
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+无需激活虚拟环境，命令直接指定解释器。网页资源由 Python 同时提供，不需要独立前端开发服务器。Windows 热重载开发可使用：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 3000 --no-proxy-headers
+```
+
+## 配置模型
+
+点击页面右上角“模型配置”，填写服务地址、模型名称和 API 密钥。选择支持 **Chat Completions + function/tool calling** 的模型服务，地址填写到 `/v1` 或供应商对应路径，不包含 `/chat/completions`。
+
+配置只存在当前服务进程内存中，不写入浏览器或磁盘，读取配置时不会返回密钥。已有密钥时留空保留；“切回演示模式”清除当前内存密钥。保存不等于连通性验证，第一次对话才会实际调用供应商并产生相应费用。
+
+需要重启后保留配置时，将 `.env.example` 复制为 `.env` 并填写。启动时读取项目根目录的 `.env`，操作系统已有同名环境变量优先。不要提交 `.env` 或把真实密钥写进代码。每个组员分别配置自己的密钥。
+
+没有密钥也能运行，页面明确显示“演示模式”，只按关键词返回本地资料原文，不具备大模型理解能力。可先问“比赛需要提交哪些材料？”。真实供应商尚未使用实际密钥验证，自动测试使用模拟模型和 HTTP 模拟响应。
+
+## 开发结构
+
+```text
+main.py                   PyCharm / 终端启动入口
+ark/
+  web.py                  FastAPI 路由、边界检查、并发限制
+  engine.py               模型适配与智能体工具循环
+  tools.py                业务工具定义、参数校验与执行
+  settings.py             模型配置、.env 读取、项目路径
+agent.config.json         名称、主题、角色设定、启用工具和快捷问题
+knowledge/                UTF-8 的 Markdown/TXT 资料
+public/                   网页，可独立修改样式和交互
+tests/                    Python 单元测试与 API 集成测试
+requirements.txt          已验证并固定版本的依赖
+```
+
+`engine.py` 不依赖 Web 路由，未来可被桌面外壳或其他服务复用。新增业务工具时，在 `tools.py` 注册定义、实现参数校验与执行逻辑，再通过 `agent.config.json` 启用。知识库和主题配置下一次请求自动读取。知识检索目前是本地关键词匹配，不是向量检索。
+
+现有工具：资料检索、任务清单、中国标准时间。模型每轮最多请求 5 个工具，最多执行 5 轮；网页展示实际参数、结果及资料来源。单次模型请求最长 45 秒，完整任务最长 120 秒；最大并发为 3。模型配置在任务执行中不可修改，每个任务持有独立配置快照。
+
+## 验证
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m pip check
+```
+
+测试包含资料来源、真实模式的模拟工具循环、未知工具、工具参数错误、循环上限、模型 HTTP 请求格式与异常、密钥不回传、网页/API 契约、请求大小限制、跨站及私有文件保护、并发与配置冲突、超时后释放名额。GitHub Actions 会在 Windows 和 Linux 的 Python 3.12 上执行这些检查。
 
 ## 组内协作
 
 仓库：https://github.com/AndrewChong233/agent_ark
 
-仓库所有者在 GitHub 的 Settings → Collaborators 中邀请组员。每位组员使用自己的 GitHub 账号，不共享密码或访问令牌。在 PyCharm 中通过 Git → Clone 填写仓库地址，或在终端执行：
-
-```powershell
-git clone https://github.com/AndrewChong233/agent_ark.git
-cd agent_ark
-npm start
-```
-
-当前版本使用 Node.js 22 或更新版本，尚未迁移到 Python。PyCharm 可以打开此目录；运行时可使用其终端。每个人在自己电脑上配置模型密钥，禁止提交 `.env`。仓库只提供无密钥的 `.env.example`。
-
-主分支 `main` 保持可运行。开始一个新任务前，先确认本地修改已提交或暂存，再更新主分支并创建功能分支，例如：
+所有者在 Settings → Collaborators 邀请组员，每位组员使用自己的账号。PyCharm 中通过 Git → Clone 填写仓库地址。主分支 `main` 保持可运行，新任务从最新主分支创建功能分支：
 
 ```powershell
 git switch main
@@ -26,69 +95,14 @@ git pull --ff-only
 git switch -c feature/file-export
 ```
 
-完成后运行 `npm test`，仅提交此次任务相关文件，推送功能分支，再在 GitHub 创建 Pull Request，指定一位组员检查后合并。开始新任务时重新从最新 `main` 创建分支。不要强制推送共享分支。页面、引擎、业务工具尽量由不同组员负责，修改公共接口前先在组内约定参数和返回格式。
+先处理本地未提交修改再切换或更新分支。完成相关测试后，只提交此次任务的文件，推送分支并发起 Pull Request，由组员检查后合并。不要强制推送共享分支。页面、核心引擎和业务工具可以分别负责，修改接口前约定参数与返回格式。
 
-## 快速运行
+## 迁移说明与发布边界
 
-电脑已安装 Node.js v24，无需安装第三方依赖。在本目录打开 PowerShell：
+旧 Node.js 服务、工具和测试已经移除；原来的 `npm start` / `npm test` 改为上面的 Python 命令。原有 `/api/config`、`/api/model`、`/api/chat` 的 JSON 字段与静态资源路径保持兼容，浏览器已有的本地会话仍可使用。
 
-```powershell
-npm start
-```
+当前是单进程、本机开发版本，默认 `127.0.0.1:3000`。模型配置仅允许本机修改，Host 检查也仅接受本机地址；不信任代理传入的客户端地址。会话保存在浏览器，发消息时最近对话会传给模型供应商。静态服务只开放三个网页资源，不开放项目目录。
 
-访问 http://127.0.0.1:3000 。也可以双击 `start.cmd`。服务运行时保留终端窗口，Ctrl+C 停止。
+以后部署到网络，需要按部署环境设计 HTTPS、登录、模型配置权限、按用户限流和服务端存储，并调整 Host/Origin 策略；多进程部署需要共享状态，不能直接复用当前内存配置。云端生成文件需要提供下载，本机文件操作需要独立的本地执行能力。当前不含登录、联网搜索、PDF解析、流式输出、文件导出、exe 安装包或手机系统权限集成。
 
-没有模型密钥也可以运行，页面会明确显示“演示模式”。演示模式只按关键词检索本地资料，不具备大模型理解能力。建议先问“比赛需要提交哪些材料？”。
-
-## 接入真实模型
-
-页面右上角提供“模型配置”：填写地址、模型名称和 API 密钥，保存后即可发消息。配置只存在当前后端进程的内存中，不保存在浏览器，也不写入磁盘；重启服务后会恢复 `.env` 的配置。已有密钥时留空保留，使用“切回演示模式”可清除当前内存中的密钥。保存不等于连通性验证，实际供应商兼容性以第一次对话为准。该入口仅供本机开发使用，不能直接用于公网多用户部署。
-
-若需要重启后仍保留配置，使用以下方式：
-
-1. 将 `.env.example` 复制为 `.env`。
-2. 填写 `MODEL_BASE_URL`、`MODEL_API_KEY` 和 `MODEL_NAME`，重启服务。
-3. 选择支持 **Chat Completions 和 function/tool calling** 的模型服务。地址填写到 `/v1` 或供应商对应路径，不包含 `/chat/completions`。
-
-密钥仅在服务端使用，不会发给浏览器。配置好密钥只表示启用模型模式，实际连通性以发送消息的结果为准。服务费用按你所选供应商的规则计费。此版本暂未接入真实密钥验证。
-
-## 已有能力
-
-- 中文响应式网页，快捷问题、浏览器本地会话历史、JSON 导出。
-- 可替换的角色设定、主题、名称和提示问题。
-- 模型 → 工具 → 模型的执行循环，最多 5 轮；展示实际工具参数、结果和资料来源。
-- 本地 Markdown/TXT 关键词检索、结构化任务清单、中国标准时间。
-- 模型连接超时、请求体和消息长度限制、工具参数校验及错误提示。
-- 默认仅监听本机，不安装外部包，不依赖第三方前端 CDN。
-
-## 抽题后怎么改
-
-| 位置 | 用途 |
-| --- | --- |
-| `agent.config.json` | 修改名称、主题、系统提示词、快捷问题和启用的工具 |
-| `knowledge/` | 添加 UTF-8 的 `.md`、`.txt` 领域资料，下一次请求自动读取 |
-| `src/tools.mjs` | 增加工具定义和对应执行逻辑，并在配置中启用 |
-| `src/engine.mjs` | 模型适配、执行循环与演示逻辑 |
-| `public/` | 修改网页界面和交互 |
-
-例如抽到“运动”，可定位“大学生运动计划助手”，再增加目标采集、训练计划、打卡统计工具。先确定目标用户和一个具体问题，再扩展功能。仅替换提示词不足以形成完整参赛作品。
-
-添加业务工具时，定义参数结构，并在执行函数中验证参数。涉及外部写入或删除的工具应增加预览和用户确认，不要直接允许模型执行任意代码。
-
-## 验证
-
-```powershell
-npm test
-```
-
-测试覆盖检索来源、真实模式的模拟模型工具循环、未知工具拒绝、循环停止、输入与清单校验。模拟模型测试不代表实际供应商已联通。
-
-## 从本地原型到参赛体验链接
-
-目前是本地原型，`127.0.0.1` 地址只在当前电脑可访问，不是可以提交给评委的公网体验链接。确定赛题并完成核心功能后，可把同一前后端部署到支持 Node.js 的云服务。
-
-公网发布前需要配置 HTTPS、访问控制、按用户限流/额度及服务端数据存储；当前仅有全局并发上限，会话保存在浏览器内，发送请求时最近对话会传给模型服务。当前版本不含登录、多用户隔离、联网搜索、向量检索、PDF解析、流式输出或 exe 安装包。避免直接把本机开发服务暴露到公网。
-
-建议比赛主交付采用网页；只有明确需要离线、本地硬件或桌面集成时，再用桌面外壳打包成 exe，智能体核心逻辑可以继续复用。
-
-实现使用 Node.js 内置 [HTTP 服务](https://nodejs.org/api/http.html) 和 [fetch](https://nodejs.org/api/globals.html#fetch)。
+实现参考：[FastAPI 测试](https://fastapi.tiangolo.com/tutorial/testing/)、[HTTPX 超时](https://www.python-httpx.org/advanced/timeouts/)。

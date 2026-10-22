@@ -1,4 +1,9 @@
 @echo off
 cd /d "%~dp0"
-node --env-file-if-exists=.env server.mjs
+if not exist ".venv\Scripts\python.exe" (
+  echo Create the Python environment first. See README.md.
+  pause
+  exit /b 1
+)
+".venv\Scripts\python.exe" main.py
 pause

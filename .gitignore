@@ -7,3 +7,7 @@ __pycache__/
 .idea/
 preview.png
 model-settings-preview.png
+python-backend-preview.png
+*.pyc
+.pytest_cache/
+.ruff_cache/
