@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ARK · 智能体工作台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="ARK 首页"><span class="logo">A</span> ARK<span class="brand-sub">实验室</span></a>
+    <div class="sidebar-label">阅读实践周 / 2026</div>
+    <button id="new-chat" class="new-chat">＋ 新建会话</button>
+    <div class="sidebar-label history-label">最近会话</div><nav id="history" aria-label="会话历史"></nav>
+    <div class="sidebar-bottom"><span class="green-dot"></span> 本地开发工作台<small>先搭底座，再让想法发生。</small></div>
+  </aside>
+  <main>
+    <header><div><span class="eyebrow">AGENT WORKSPACE</span><h1 id="agent-name">智能体工作台</h1></div><div class="header-actions"><span id="mode" class="mode">正在连接…</span><button id="model-settings" class="settings-button">⚙ 模型配置</button></div></header>
+    <nav class="compact-actions" aria-label="会话操作"><button id="compact-new">＋ 新建会话</button><button id="compact-export">↓ 导出会话</button></nav>
+    <div class="workspace">
+      <section class="conversation" aria-label="智能体对话">
+        <div id="intro" class="intro"><span class="pill">为未知主题，准备好起点</span><h2>你的下一个想法，<br>从这里开始<span>。</span></h2><p id="description">从一个主题词，走向一个能解决问题的智能体。</p><div id="starters" class="starters"></div></div>
+        <div id="messages" role="log" aria-label="聊天消息" aria-live="polite"></div>
+        <div class="composer-wrap"><div id="status" class="status" role="status"></div><form id="composer"><label for="prompt" class="sr-only">输入你的问题</label><textarea id="prompt" rows="2" maxlength="8000" placeholder="说说你想解决的问题… Enter 发送，Shift + Enter 换行"></textarea><div class="composer-bottom"><span>资料检索 · 工具调用 · 会话记录</span><button id="send" type="submit">发送 ↗</button></div></form><p class="footnote">演示模式只返回本地资料；接入模型后启用完整智能体能力。</p></div>
+      </section>
+      <aside class="inspector"><div class="panel-heading">项目面板 <span>01</span></div><div class="theme-card"><span class="eyebrow">CURRENT THEME</span><h3 id="theme">待抽取主题</h3><p>主题揭晓后，替换角色设定、领域资料与业务工具。</p><span class="tag">引擎已就绪</span></div><div class="panel-heading tools-heading">可用能力</div><div id="tools"></div><div class="architecture"><span class="eyebrow">HOW IT WORKS</span><p>理解你的目标</p><span>↓</span><p>模型选择工具 · 获取依据</p><span>↓</span><p>生成可执行的结果</p></div><button id="export" class="export">↓ 导出当前会话</button><small class="storage-note">会话保存在当前浏览器。请勿在共享设备中输入敏感信息。</small></aside>
+    </div>
+  </main>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="settings-heading"><h2 id="settings-title">连接你的模型</h2><button id="close-settings" type="button" aria-label="关闭模型配置">×</button></div>
+      <p class="settings-description">填写支持 Chat Completions 和工具调用的模型服务。密钥只发给本机后端，实际调用时发给你指定的服务商。</p>
+      <label for="model-url">API 服务地址</label><input id="model-url" type="url" placeholder="https://your-provider.example/v1" required maxlength="2000">
+      <label for="model-name">模型名称</label><input id="model-name" placeholder="填写服务商提供的模型 ID" required maxlength="200">
+      <label for="model-key">API 密钥</label><input id="model-key" type="password" placeholder="输入密钥" autocomplete="off" maxlength="4096" spellcheck="false">
+      <p class="settings-description">配置仅在当前服务进程内生效，不写入文件或浏览器存储。重启后恢复 .env 配置。保存不会测试连接，首次发送消息时验证。</p>
+      <p id="settings-status" role="status"></p><div class="settings-actions"><button id="use-demo" type="button">切回演示模式</button><button id="save-settings" type="submit">保存配置</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

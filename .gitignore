@@ -1,0 +1,9 @@
+.env
+node_modules/
+*.log
+.venv/
+venv/
+__pycache__/
+.idea/
+preview.png
+model-settings-preview.png
