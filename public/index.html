@@ -43,7 +43,7 @@
       <label for="model-url">API 服务地址</label><input id="model-url" type="url" placeholder="https://your-provider.example/v1" required maxlength="2000">
       <label for="model-name">模型名称</label><input id="model-name" placeholder="填写服务商提供的模型 ID" required maxlength="200">
       <label for="model-key">API 密钥</label><input id="model-key" type="password" placeholder="输入密钥" autocomplete="off" maxlength="4096" spellcheck="false">
-      <p class="settings-description">配置仅在当前服务进程内生效，不写入文件或浏览器存储。重启后恢复 .env 配置。保存不会测试连接，首次发送消息时验证。</p>
+      <p class="settings-description">保存后自动记住：地址、模型名和密钥以明文保存在本机项目的 .env 文件，重启自动加载，不存入浏览器或上传Git。留空密钥可保留已有密钥；切回演示模式会清除已保存密钥。保存不会测试连接。</p>
       <p id="settings-status" role="status"></p><div class="settings-actions"><button id="use-demo" type="button">切回演示模式</button><button id="save-settings" type="submit">保存配置</button></div>
     </form>
   </dialog>

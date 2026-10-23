@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .engine import ModelError, run_agent, validate_messages
 from .runs import RunManager, TERMINAL
-from .settings import ROOT, ModelSettings, validate_model_settings
+from .settings import ROOT, ModelSettings, validate_model_settings, persist_model_settings
 from .spaces import Spaces
 
 MAX_BODY = 100000
@@ -41,14 +41,15 @@ def read_config():
     return json.loads((ROOT / "agent.config.json").read_text(encoding="utf-8-sig"))
 
 
-def create_app(settings=None):
+def create_app(settings=None, settings_path=None):
     @asynccontextmanager
     async def lifespan(app):
         yield
         await app.state.runs.close()
 
     app = FastAPI(title="ARK Agent", version="0.3.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-    app.state.settings = settings if settings is not None else ModelSettings.from_environment()
+    app.state.settings_path = settings_path if settings_path is not None else (ROOT / '.env' if settings is None else None)
+    app.state.settings = settings if settings is not None else ModelSettings.from_environment(app.state.settings_path)
     app.state.busy = 0
     app.state.runs = RunManager(app.state)
     app.state.spaces = Spaces()
@@ -167,9 +168,12 @@ def create_app(settings=None):
         if app.state.busy:
             return JSONResponse({"error": "请等待当前对话完成再修改模型"}, 409)
         if data.get("action") == "demo":
-            app.state.settings = replace(app.state.settings, api_key="")
+            updated = replace(app.state.settings, api_key="")
         else:
-            app.state.settings = validate_model_settings(data, app.state.settings.api_key)
+            updated = validate_model_settings(data, app.state.settings.api_key)
+        if app.state.settings_path is not None:
+            persist_model_settings(updated, app.state.settings_path)
+        app.state.settings = updated
         return app.state.settings.public()
 
     @app.post("/api/chat")

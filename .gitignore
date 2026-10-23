@@ -13,3 +13,4 @@ python-backend-preview.png
 .ruff_cache/
 execution-preview.png
 data/
+.env-save-*

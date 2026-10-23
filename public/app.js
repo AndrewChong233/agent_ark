@@ -335,7 +335,7 @@ async function saveModel(action) {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '保存失败');
     updateMode(result.hasKey); $('settings-dialog').close();
-    $('status').textContent = result.hasKey ? '配置已保存到服务内存，首次发送消息时验证连接。' : '已切回演示模式。';
+    $('status').textContent = result.hasKey ? '配置已保存在本机，重启自动加载。首次发送消息时验证连接。' : '已切回演示模式，并清除已保存的密钥。';
   } catch (error) { $('settings-status').textContent = error.message; }
   finally { $('save-settings').disabled = false; $('use-demo').disabled = false; }
 }

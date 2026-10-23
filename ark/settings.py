@@ -1,12 +1,13 @@
-"""进程内模型配置；密钥不会写入磁盘或返回前端。"""
+"""本机模型配置；持久化到被 Git 忽略的 .env，不回传密钥。"""
 
 from dataclasses import dataclass, field
 import os
 import re
+import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, set_key
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -18,16 +19,40 @@ class ModelSettings:
     api_key: str = field(default="", repr=False)
 
     @classmethod
-    def from_environment(cls):
-        load_dotenv(ROOT / ".env", override=False)
+    def from_environment(cls, path=None):
+        values = dotenv_values(path or ROOT / '.env', interpolate=False)
+        for key in ('HOST', 'PORT'):
+            if values.get(key):
+                os.environ.setdefault(key, values[key])
         return cls(
-            os.getenv("MODEL_BASE_URL", ""),
-            os.getenv("MODEL_NAME", ""),
-            os.getenv("MODEL_API_KEY", ""),
+            values.get('MODEL_BASE_URL', os.getenv("MODEL_BASE_URL", "")) or '',
+            values.get('MODEL_NAME', os.getenv("MODEL_NAME", "")) or '',
+            values.get('MODEL_API_KEY', os.getenv("MODEL_API_KEY", "")) or '',
         )
 
     def public(self):
         return {"baseUrl": self.base_url, "model": self.model, "hasKey": bool(self.api_key)}
+
+
+def persist_model_settings(settings, path):
+    """先完成文件替换再更新运行配置；失败时保留原文件。"""
+    path = Path(path)
+    if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
+        raise ValueError('配置文件不能是链接')
+    temporary = None
+    try:
+        existing = path.read_text(encoding='utf-8-sig') if path.exists() else ''
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, prefix='.env-save-', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(existing)
+        for key, value in {'MODEL_BASE_URL':settings.base_url, 'MODEL_NAME':settings.model, 'MODEL_API_KEY':settings.api_key}.items():
+            set_key(str(temporary), key, value, quote_mode='always')
+        os.replace(temporary, path)
+    except OSError:
+        raise ValueError('无法保存本机配置，请检查项目目录写入权限；原配置未更改') from None
+    finally:
+        if temporary and temporary.exists():
+            temporary.unlink()
 
 
 def validate_model_settings(data, existing_key=""):
