@@ -198,7 +198,7 @@ def create_app(settings=None):
 
     @app.get("/api/spaces/{space_id}/files")
     async def list_files(space_id: str):
-        return {"files": app.state.spaces.files(space_id)}
+        return {"files": app.state.spaces.files(space_id), "directory": str(app.state.spaces.directory(space_id).absolute())}
 
     @app.post("/api/spaces/{space_id}/read")
     async def read_file(space_id: str, request: Request):

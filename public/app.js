@@ -44,10 +44,17 @@ $('close-organizer').onclick=()=>$('organizer-dialog').close();
 $('create-space-form').onsubmit=async event=>{event.preventDefault();try{const space=await api('/api/spaces',{name:$('space-name').value});current.spaceId=space.id;save();$('space-name').value='';$('organizer-status').textContent='主题空间已创建。文件写入仍需要逐文件批准。';await loadSpaces();drawMap();render();}catch(error){$('organizer-status').textContent=error.message;}};
 $('close-files').onclick=()=>$('files-dialog').close();
 $('space-files').onclick=async()=>{
-  $('files-dialog').showModal();$('file-preview').textContent='';$('files-list').replaceChildren();
+  const scope=current.spaceId;
+  $('files-dialog').showModal();$('file-preview').textContent='';$('files-list').replaceChildren();$('folder-location').replaceChildren();$('file-actions').replaceChildren();$('markdown-preview').replaceChildren();$('selected-file').textContent='选择一个文件查看';
   if(!current.spaceId){$('files-list').textContent='请先选择或创建主题空间。';return;}
-  try{const {files}=await api(`/api/spaces/${current.spaceId}/files`);if(!files.length)$('files-list').textContent='这里还没有文件。可以让智能体生成一份笔记草稿，批准后即可保存。';
-    for(const file of files){const button=node('button',`${file.name} · ${file.bytes} B`,'map-leaf');button.onclick=async()=>{try{$('file-preview').textContent=(await api(`/api/spaces/${current.spaceId}/read`,{name:file.name})).content;}catch(error){$('file-preview').textContent=error.message;}};$('files-list').append(button);}
+  try{const {files,directory}=await api(`/api/spaces/${scope}/files`);$('folder-location').append(node('p',`本机保存目录：${directory}`),copyButton(directory,'复制目录路径'));if(!files.length)$('files-list').textContent='这里还没有文件。生成草稿并批准后，文件会显示在这里。';
+    for(const file of files){const button=node('button',`${file.name} · ${file.bytes} B`,'map-leaf');button.onclick=async()=>{try{
+      const data=await api(`/api/spaces/${scope}/read`,{name:file.name});$('selected-file').textContent=data.name;$('file-preview').textContent=data.content;$('file-preview').hidden=true;$('markdown-preview').hidden=false;$('markdown-preview').replaceChildren(/\.(md|markdown)$/i.test(data.name)?formattedText(data.content):node('pre',data.content));$('file-actions').replaceChildren();
+      const preview=node('button','阅读预览','copy-button');preview.onclick=()=>{$('markdown-preview').hidden=false;$('file-preview').hidden=true;};
+      const source=node('button','查看源码','copy-button');source.onclick=()=>{$('markdown-preview').hidden=true;$('file-preview').hidden=false;};
+      const download=node('button','下载 / 另存副本','copy-button');download.onclick=()=>{const url=URL.createObjectURL(new Blob([data.content],{type:'text/plain;charset=utf-8'}));const link=node('a');link.href=url;link.download=data.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+      $('file-actions').append(preview,source,copyButton(data.path,'复制文件路径'),download);
+    }catch(error){$('markdown-preview').textContent=error.message;}};$('files-list').append(button);}
   }catch(error){$('files-list').textContent=error.message;}
 };
 document.querySelector('.inspector').prepend($('run-console'));
@@ -62,18 +69,28 @@ function copyButton(text, label = '复制') {
 function formattedText(text) {
   const container = node('div', undefined, 'formatted-text');
   let code = null, buffer = [];
-  for (const line of text.split('\n')) {
+  const lines=text.split('\n');
+  const cells=line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(cell=>cell.trim());
+  for (let index=0;index<lines.length;index++) {
+    const line=lines[index];
     if (line.trimStart().startsWith('```')) {
       if (code) { code.append(node('pre', buffer.join('\n')), copyButton(buffer.join('\n'), '复制代码')); container.append(code); code = null; buffer = []; }
       else code = node('div', undefined, 'code-block');
       continue;
     }
     if (code) { buffer.push(line); continue; }
+    if(line.includes('|') && index+1<lines.length && cells(lines[index+1]).length>1 && cells(lines[index+1]).every(cell=>/^:?-{3,}:?$/.test(cell))){
+      const wrap=node('div',undefined,'table-scroll'), table=node('table'),head=node('thead'),header=node('tr');
+      for(const cell of cells(line))header.append(node('th',cell));head.append(header);table.append(head);const body=node('tbody');index++;
+      while(index+1<lines.length && lines[index+1].includes('|') && lines[index+1].trim()) {const row=node('tr');for(const cell of cells(lines[++index]))row.append(node('td',cell));body.append(row);}
+      table.append(body);wrap.append(table);container.append(wrap);continue;
+    }
+    if(/^\s*(---+|\*\*\*+)\s*$/.test(line)){container.append(node('hr'));continue;}
     if (!line.trim()) { container.append(node('div', undefined, 'text-gap')); continue; }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     const list = line.match(/^(?:[-*•]|\d+[.)、])\s+(.+)$/);
-    const block = node(heading ? 'h4' : 'p', undefined, list ? 'text-list-item' : '');
-    const content = heading ? heading[2] : list ? list[1] : line;
+    const block = node(heading ? `h${heading[1].length}` : 'p', undefined, list ? 'text-list-item' : line.startsWith('> ') ? 'text-quote' : '');
+    const content = heading ? heading[2] : list ? list[1] : line.replace(/^> /,'');
     for (const part of content.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)) {
       block.append(part.startsWith('**') && part.endsWith('**') ? node('strong', part.slice(2, -2)) : part.startsWith('`') && part.endsWith('`') ? node('code', part.slice(1, -1)) : document.createTextNode(part));
     }

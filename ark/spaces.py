@@ -59,7 +59,7 @@ class Spaces:
             return {"id": space_id, "name": name.strip()}
 
     def file_path(self, space_id, name):
-        if not isinstance(name, str) or not re.fullmatch(r"[\w][\w .()-]{0,78}\.(?:md|txt|json|csv)", name, re.I) or ".." in name:
+        if not isinstance(name, str) or not re.fullmatch(r"[\w][\w .()-]{0,78}\.(?:md|markdown|txt|json|csv)", name, re.I) or ".." in name:
             raise ValueError("仅支持空间内的普通 md/txt/json/csv 文件名，不允许路径")
         if re.match(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", name, re.I):
             raise ValueError("不允许系统保留文件名")
@@ -84,7 +84,7 @@ class Spaces:
             path = self.file_path(space_id, name)
             if not path.is_file() or path.stat().st_size > 20000:
                 raise ValueError("文件不存在或超过20KB")
-            return {"name": name, "content": path.read_text(encoding="utf-8")}
+            return {"name": name, "path": str(path.absolute()), "content": path.read_text(encoding="utf-8-sig")}
 
     def propose(self, space_id, name, content):
         with self.lock:
@@ -118,7 +118,7 @@ class Spaces:
             except FileExistsError:
                 raise ValueError("同名文件已存在，不会覆盖。请让智能体使用新文件名") from None
             del self.drafts[draft_id]
-            return {"status": "saved", "name": path.name}
+            return {"status": "saved", "name": path.name, "path": str(path.absolute())}
 
 
 SPACE_TOOLS = [
